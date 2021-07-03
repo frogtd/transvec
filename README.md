@@ -19,6 +19,10 @@ let input: Vec<u8> = vec![1, 2, 3, 4];
 let output: Vec<u16, _> = transmute_vec(input).unwrap();
 ```
 
+## Nightly
+
+This is nightly because it's blocked on the `allocator_api`, which is how this crate can get around the aligment issue. 
+
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
