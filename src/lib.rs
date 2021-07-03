@@ -347,4 +347,29 @@ mod tests {
             assert_eq!(&output, &[1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8, 0]);
         }
     }
+
+    #[test]
+    fn add_and_remove() {
+        let input_vec: Vec<u16> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let mut output: Vec<u8, _> = match transmute_vec(input_vec) {
+            Ok(x) => x,
+            Err((_, err)) => return println!("Error: {:?}", err),
+        };
+        output.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        for _ in 0..10 {
+            output.pop();
+        }
+    }
+
+    #[test]
+    fn wrong_length() {
+        let input: Vec<u8> = vec![1, 2, 3];
+        match transmute_vec::<_, u16>(input) {
+            Ok(_) => panic!(),
+            Err((_, err)) => match err {
+                TransmuteError::Alignment | TransmuteError::Length => (),
+                x => panic!("{:?}", x),
+            },
+        };
+    }
 }
