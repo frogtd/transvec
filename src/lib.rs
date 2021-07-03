@@ -31,7 +31,6 @@ use core::slice;
 use std::{
     alloc::{AllocError, Allocator, Layout},
     cmp::Ordering,
-    fmt::Display,
     marker::PhantomData,
     mem::{self, ManuallyDrop},
     ptr::{self, NonNull},
@@ -51,16 +50,6 @@ pub enum TransmuteError {
     #[error("capacicty of vec is incorrect")]
     /// When the capacity wouldn't be able to fit.
     Capacity,
-}
-
-/// When the length doesn't line up correctly in `[transmute_vec_may_copy]`.
-#[derive(Error, Debug, PartialEq, Eq)]
-pub struct Length;
-
-impl Display for Length {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Length is incorrect.")
-    }
 }
 
 /// Implementation detail: Do not use
