@@ -114,9 +114,14 @@ unsafe impl<I, O> Allocator for AlignmentCorrectorAllocator<I, O> {
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
-        old_layout: Layout,
+        mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        if ptr.as_ptr() == self.ptr as *mut _ {
+            old_layout = unsafe {
+                Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
+            };
+        };
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.grow(ptr, old_layout, new_layout) }
     }
@@ -125,9 +130,14 @@ unsafe impl<I, O> Allocator for AlignmentCorrectorAllocator<I, O> {
     unsafe fn grow_zeroed(
         &self,
         ptr: NonNull<u8>,
-        old_layout: Layout,
+        mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        if ptr.as_ptr() == self.ptr as *mut _ {
+            old_layout = unsafe {
+                Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
+            };
+        };
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.grow_zeroed(ptr, old_layout, new_layout) }
     }
@@ -136,9 +146,14 @@ unsafe impl<I, O> Allocator for AlignmentCorrectorAllocator<I, O> {
     unsafe fn shrink(
         &self,
         ptr: NonNull<u8>,
-        old_layout: Layout,
+        mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
+        if ptr.as_ptr() == self.ptr as *mut _ {
+            old_layout = unsafe {
+                Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
+            };
+        };
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.shrink(ptr, old_layout, new_layout) }
     }
@@ -238,15 +253,16 @@ where
 /// This errors when:
 /// 1. The length of the vector wouldn't fit the type.
 /// ```should_panic
-/// # #![feature(allocator_api)] 
+/// # #![feature(allocator_api)]
 /// # use transvec::transmute_vec;
 /// let input: Vec<u8> = vec![1, 2, 3];
 /// let output: Vec<u16, _> = transmute_vec(input).unwrap();
 /// ```
 /// 2. The capacity can't be converted to units of the output type.
 /// 3. The alignment of the vec is wrong.
-/// 
+///
 /// Alignment, then length, then capacity will always be returned.
+/// # See als
 #[allow(clippy::type_complexity)]
 pub fn transmute_vec<I: Pod, O: Pod>(
     input: Vec<I>,
@@ -291,7 +307,6 @@ pub fn transmute_vec<I: Pod, O: Pod>(
         }
         Ordering::Equal => {
             if ptr.align_offset(mem::align_of::<O>()) == 0 {
-
                 // SAFETY: its aligned and thats all that matters
                 Ok(unsafe { from_raw_parts(ptr.cast(), length, capacity) })
             } else {
