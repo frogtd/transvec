@@ -262,7 +262,8 @@ where
 /// 3. The alignment of the vec is wrong.
 ///
 /// Alignment, then length, then capacity will always be returned.
-/// # See als
+/// # See also
+/// - [`transmute_vec_may_copy`]
 #[allow(clippy::type_complexity)]
 pub fn transmute_vec<I: Pod, O: Pod>(
     input: Vec<I>,
