@@ -308,7 +308,7 @@ pub fn transmute_vec<I: Pod, O: Pod>(
 #[cfg(test)]
 mod tests {
 
-    use crate::transmute_vec;
+    use crate::{transmute_vec, TransmuteError};
 
     #[test]
     // It does work with the same sized types
