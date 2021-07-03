@@ -1,10 +1,7 @@
 #![feature(allocator_api)]
-#![feature(const_generics)]
-#![feature(const_evaluatable_checked)]
 
 #![warn(unsafe_op_in_unsafe_fn)]
 #![deny(missing_docs)]
-#![allow(incomplete_features)]
 //! This is a way to "transmute" Vecs soundly.
 //! ```
 //! #![feature(allocator_api)] // this requires the allocator api because the way that this
@@ -30,7 +27,6 @@
 //! }
 
 use bytemuck::Pod;
-use chunk_iter::ChunkIter;
 use core::slice;
 use std::{
     alloc::{AllocError, Allocator, Layout},
@@ -190,8 +186,6 @@ pub enum CopyNot<I, O, A: Allocator> {
 /// [`transmute_vec_may_copy`] but it tells you whether or not a copy occured and returns a normal
 /// vec if it doesn't.
 pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -> CopyNot<I, O, A>
-where
-    [(); mem::size_of::<O>()]: , // todo: see if i can remove this where
 {
     match transmute_vec(input) {
         Ok(x) => CopyNot::Not(x),
@@ -214,12 +208,10 @@ where
                     allocator,
                 );
                 for x in bytes_slice
-                    .iter()
-                    .copied()
-                    .chunks::<{ mem::size_of::<O>() }>()
+                    .chunks(mem::size_of::<O>())
                 {
-                    // SAFETY: O is Pod and the array is the same length as the type.
-                    return_vec.push(unsafe { mem::transmute_copy(&x) })
+                    // SAFETY: O is Pod and the slice is the same length as the type.
+                    return_vec.push(unsafe { ptr::read_unaligned(x.as_ptr() as *const O) })
                 }
                 // freeing memory
                 // SAFETY: this size and align come from a vec and the allocator is the same one
@@ -272,8 +264,6 @@ where
 pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
 ) -> Vec<O, AlignmentCorrectorAllocator<I, O, A>>
-where
-    [(); mem::size_of::<O>()]: ,
 {
     match transmute_vec_copy_enum(input) {
         CopyNot::Copy(x) => {
