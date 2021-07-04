@@ -11,8 +11,8 @@ categories = ["memory-management"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bytemuck = "1.7.0"
-thiserror = "1.0.25"
+bytemuck = "1.7"
+thiserror = "1.0"
 
 [dev-dependencies]
-bytemuck_derive = "*" # wild card because its required by bytemuck and i find it highly unlikely that they would change the names
+bytemuck_derive = "1"
