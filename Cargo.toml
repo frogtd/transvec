@@ -1,6 +1,6 @@
 [package]
 name = "transvec"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2018"
 readme = "README.md"
 repository = "https://github.com/frogtd/transvec"
@@ -13,3 +13,6 @@ categories = ["memory-management"]
 [dependencies]
 bytemuck = "1.7.0"
 thiserror = "1.0.25"
+
+[dev-dependencies]
+bytemuck_derive = "*" # wild card because its required by bytemuck and i find it highly unlikely that they would change the names

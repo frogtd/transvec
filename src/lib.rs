@@ -1,5 +1,4 @@
 #![feature(allocator_api)]
-
 #![warn(unsafe_op_in_unsafe_fn)]
 #![deny(missing_docs)]
 //! This is a way to "transmute" Vecs soundly.
@@ -174,8 +173,7 @@ pub enum CopyNot<I, O, A: Allocator> {
 
 /// [`transmute_vec_may_copy`] but it tells you whether or not a copy occured and returns a normal
 /// vec if it doesn't.
-pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -> CopyNot<I, O, A>
-{
+pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -> CopyNot<I, O, A> {
     match transmute_vec(input) {
         Ok(x) => CopyNot::Not(x),
         Err((old_vec, err)) => match err {
@@ -186,7 +184,6 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                         ptr::read(me.allocator())
                     })
                 };
-                
 
                 // SAFETY: the ptr comes from a vec and the length is calcuated properly
                 let bytes_slice = unsafe {
@@ -196,20 +193,20 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                     (length * mem::size_of::<I>()) / mem::size_of::<O>(),
                     allocator,
                 );
-                for x in bytes_slice
-                    .chunks(mem::size_of::<O>())
-                {
+                for x in bytes_slice.chunks(mem::size_of::<O>()) {
                     // SAFETY: O is Pod and the slice is the same length as the type.
-                    return_vec.push(unsafe { ptr::read_unaligned(x.as_ptr() as *const O) })
+                    return_vec.push(unsafe { ptr::read_unaligned(x.as_ptr().cast()) })
                 }
                 // freeing memory
                 // SAFETY: this size and align come from a vec and the allocator is the same one
                 // that allocated the memory. i dont have to call drop because its Pod
-                unsafe { 
+                unsafe {
                     let align = mem::align_of::<I>();
                     let size = mem::size_of::<I>() * capacity;
-                    let layout = Layout::from_size_align_unchecked(size, align) ;
-                    return_vec.allocator().deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    let layout = Layout::from_size_align_unchecked(size, align);
+                    return_vec
+                        .allocator()
+                        .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
                 };
                 CopyNot::Copy(return_vec)
             }
@@ -222,26 +219,26 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                 };
 
                 // SAFETY: the divide rounds down so the length is correct
-                let return_vec = 
-                    unsafe {
-                        slice::from_raw_parts(
-                            ptr.cast::<O>(),
-                            (length * mem::size_of::<I>()) / mem::size_of::<O>(),
-                        )
-                    }
-                    .to_vec_in(allocator);
-                
+                let return_vec = unsafe {
+                    slice::from_raw_parts(
+                        ptr.cast::<O>(),
+                        (length * mem::size_of::<I>()) / mem::size_of::<O>(),
+                    )
+                }
+                .to_vec_in(allocator);
+
                 // freeing memory
                 // SAFETY: this size and align come from a vec and the allocator is the same one
                 // that allocated the memory. i dont have to call drop because its Pod
-                unsafe { 
+                unsafe {
                     let align = mem::align_of::<I>();
                     let size = mem::size_of::<I>() * capacity;
-                    let layout = Layout::from_size_align_unchecked(size, align) ;
-                    return_vec.allocator().deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    let layout = Layout::from_size_align_unchecked(size, align);
+                    return_vec
+                        .allocator()
+                        .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
                 };
                 CopyNot::Copy(return_vec)
-
             }
         },
     }
@@ -252,8 +249,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
 /// You may want to use [`transmute_vec_copy_enum`].
 pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
-) -> Vec<O, AlignmentCorrectorAllocator<I, O, A>>
-{
+) -> Vec<O, AlignmentCorrectorAllocator<I, O, A>> {
     match transmute_vec_copy_enum(input) {
         CopyNot::Copy(x) => {
             let (ptr, length, capacity, allocator) = {
@@ -264,7 +260,7 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
             };
 
             // SAFETY: comes directly from vec and AlignmentCorrectorAllocator::new_null
-            // doesn't actually do anything
+            // doesn't actually do anything special 
             unsafe {
                 Vec::from_raw_parts_in(
                     ptr,
@@ -328,6 +324,29 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
             ptr::read(me.allocator())
         })
     };
+    if mem::size_of::<O>() == 0 {
+
+        // SAFETY: length comes from prior vec, ptr doesnt matter for zsts and capacity is always
+        // usize::MAX
+        let return_vec = unsafe {
+            Vec::from_raw_parts_in(NonNull::dangling().as_ptr(), length, usize::MAX, 
+            AlignmentCorrectorAllocator::new_null(allocator))
+        };
+
+        // freeing memory
+        // SAFETY: this size and align come from a vec and the allocator is the same one
+        // that allocated the memory. i dont have to call drop because its Pod
+        unsafe {
+            let align = mem::align_of::<I>();
+            let size = mem::size_of::<I>() * capacity;
+            let layout = Layout::from_size_align_unchecked(size, align);
+            return_vec
+                .allocator()
+                .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+        };
+
+        return Ok(return_vec)
+    }
 
     match mem::size_of::<I>().cmp(&mem::size_of::<O>()) {
         Ordering::Greater | Ordering::Less => {
@@ -383,11 +402,16 @@ mod tests {
 
     use crate::{transmute_vec, TransmuteError};
 
+    use bytemuck_derive::{Pod, Zeroable};
+
+    #[derive(Copy, Clone, Pod, Zeroable)]
+    #[repr(C)]
+    struct Zst;
     #[test]
     // It does work with the same sized types
     fn basic_functioning() {
-        let input_vec: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
-        let output: Vec<i8, _> = match transmute_vec(input_vec) {
+        let input: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
+        let output: Vec<i8, _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
         };
@@ -396,8 +420,8 @@ mod tests {
 
     #[test]
     fn small_to_large() {
-        let input_vec: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
-        let output: Vec<u16, _> = match transmute_vec(input_vec) {
+        let input: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
+        let output: Vec<u16, _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
         };
@@ -409,8 +433,8 @@ mod tests {
     }
     #[test]
     fn large_to_small() {
-        let input_vec: Vec<u16> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let output: Vec<u8, _> = match transmute_vec(input_vec) {
+        let input: Vec<u16> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let output: Vec<u8, _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
         };
@@ -423,8 +447,8 @@ mod tests {
 
     #[test]
     fn add_and_remove() {
-        let input_vec: Vec<u16> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let mut output: Vec<u8, _> = match transmute_vec(input_vec) {
+        let input: Vec<u16> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let mut output: Vec<u8, _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
         };
@@ -444,5 +468,25 @@ mod tests {
                 x => panic!("{:?}", x),
             },
         };
+    }
+
+    #[test]
+    fn from_zsts() {
+        let input = vec![Zst {}, Zst {}, Zst {}];
+        let output: Vec<u8, _> = match transmute_vec(input) {
+            Ok(x) => x,
+            Err((_, err)) => return println!("Error: {:?}", err),
+        };
+        assert_eq!(output.len(), 0);
+    }
+
+    #[test]
+    fn to_zsts() {
+        let input: Vec<u8> = vec![0, 1, 2, 3, 4, 5];
+        let output: Vec<Zst, _> = match transmute_vec(input) {
+            Ok(x) => x,
+            Err((_, err)) => return println!("Error: {:?}", err),
+        };
+        assert_eq!(output.len(), 6);
     }
 }
