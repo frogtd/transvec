@@ -29,6 +29,7 @@ use bytemuck::Pod;
 use core::slice;
 use std::{
     alloc::{AllocError, Allocator, Layout},
+    cell::Cell,
     cmp::Ordering,
     marker::PhantomData,
     mem::{self, ManuallyDrop},
@@ -52,24 +53,24 @@ pub enum TransmuteError {
 }
 
 /// Implementation detail: Do not use
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
     allocator: A,
-    ptr: *const O,
+    ptr: Cell<Option<NonNull<O>>>,
     phantom: PhantomData<I>,
 }
 impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
-    fn new(ptr: *const O, allocator: A) -> Self {
+    unsafe fn new(ptr: NonNull<O>, allocator: A) -> Self {
         Self {
             allocator,
-            ptr,
+            ptr: Cell::new(Some(ptr)),
             phantom: PhantomData::default(),
         }
     }
     fn new_null(allocator: A) -> Self {
         Self {
             allocator,
-            ptr: ptr::null(),
+            ptr: Cell::new(None),
             phantom: PhantomData::default(),
         }
     }
@@ -87,9 +88,10 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
 
     #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, mut layout: Layout) {
-        if ptr.as_ptr() == self.ptr as *mut _ {
+        if Some(ptr.cast()) == self.ptr.get() {
             layout =
                 unsafe { Layout::from_size_align_unchecked(layout.size(), mem::align_of::<I>()) };
+            self.ptr.set(None);
         }
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.deallocate(ptr, layout) }
@@ -102,11 +104,12 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
         mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
-        if ptr.as_ptr() == self.ptr as *mut _ {
+        if Some(ptr.cast()) == self.ptr.get() {
             old_layout = unsafe {
                 Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
             };
-        };
+            self.ptr.set(None);
+        }
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.grow(ptr, old_layout, new_layout) }
     }
@@ -118,11 +121,12 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
         mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
-        if ptr.as_ptr() == self.ptr as *mut _ {
+        if Some(ptr.cast()) == self.ptr.get() {
             old_layout = unsafe {
                 Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
             };
-        };
+            self.ptr.set(None);
+        }
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.grow_zeroed(ptr, old_layout, new_layout) }
     }
@@ -134,18 +138,19 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
         mut old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, AllocError> {
-        if ptr.as_ptr() == self.ptr as *mut _ {
+        if Some(ptr.cast()) == self.ptr.get() {
             old_layout = unsafe {
                 Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
             };
-        };
+            self.ptr.set(None);
+        }
         // SAFETY: all conditions must be upheld by the caller
         unsafe { self.allocator.shrink(ptr, old_layout, new_layout) }
     }
 }
 
 unsafe fn from_raw_parts<I, O, A: Allocator>(
-    old_ptr: *mut O,
+    old_ptr: NonNull<O>,
     length: usize,
     capacity: usize,
     allocator: A,
@@ -154,7 +159,7 @@ unsafe fn from_raw_parts<I, O, A: Allocator>(
     // allocation that created the old pointer
     unsafe {
         Vec::<O, AlignmentCorrectorAllocator<I, O, A>>::from_raw_parts_in(
-            old_ptr,
+            old_ptr.as_ptr(),
             length,
             capacity,
             AlignmentCorrectorAllocator::<I, O, A>::new(old_ptr, allocator),
@@ -178,6 +183,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
         Ok(x) => CopyNot::Not(x),
         Err((old_vec, err)) => match err {
             TransmuteError::Alignment => {
+                // I don't have to deal with ZSTs because transmute_vec will never fail with a ZST.
                 let (ptr, length, capacity, allocator) = {
                     let mut me = ManuallyDrop::new(old_vec);
                     (me.as_mut_ptr(), me.len(), me.capacity(), unsafe {
@@ -204,13 +210,17 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                     let align = mem::align_of::<I>();
                     let size = mem::size_of::<I>() * capacity;
                     let layout = Layout::from_size_align_unchecked(size, align);
-                    return_vec
-                        .allocator()
-                        .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    // ensuring i dont deallocate ZSTs or unallocated memory
+                    if size != 0 {
+                        return_vec
+                            .allocator()
+                            .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    }
                 };
                 CopyNot::Copy(return_vec)
             }
             TransmuteError::Capacity | TransmuteError::Length => {
+                // I don't have to deal with ZSTs because transmute_vec will never fail with a ZST.
                 let (ptr, length, capacity, allocator) = {
                     let mut me = ManuallyDrop::new(old_vec);
                     (me.as_mut_ptr(), me.len(), me.capacity(), unsafe {
@@ -234,9 +244,12 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                     let align = mem::align_of::<I>();
                     let size = mem::size_of::<I>() * capacity;
                     let layout = Layout::from_size_align_unchecked(size, align);
-                    return_vec
-                        .allocator()
-                        .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    // ensuring i dont deallocate ZSTs or unallocated memory
+                    if size != 0 {
+                        return_vec
+                            .allocator()
+                            .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+                    }
                 };
                 CopyNot::Copy(return_vec)
             }
@@ -260,7 +273,7 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
             };
 
             // SAFETY: comes directly from vec and AlignmentCorrectorAllocator::new_null
-            // doesn't actually do anything special 
+            // doesn't interfere with the allocator within
             unsafe {
                 Vec::from_raw_parts_in(
                     ptr,
@@ -312,6 +325,13 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
 /// 3. The alignment of the vec is wrong.
 ///
 /// Alignment, then length, then capacity will always be returned.
+/// # ZSTs
+/// 1. Anything -> ZST
+///     - Keeps length, deallocates data.
+/// 2. ZST -> Non ZST
+///     - New Vec from previous allocator.
+/// 3. Just don't do this.
+/// 
 /// # See also
 /// - [`transmute_vec_may_copy`]
 #[allow(clippy::type_complexity)]
@@ -325,27 +345,38 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
         })
     };
     if mem::size_of::<O>() == 0 {
-
-        // SAFETY: length comes from prior vec, ptr doesnt matter for zsts and capacity is always
-        // usize::MAX
-        let return_vec = unsafe {
-            Vec::from_raw_parts_in(NonNull::dangling().as_ptr(), length, usize::MAX, 
-            AlignmentCorrectorAllocator::new_null(allocator))
-        };
-
         // freeing memory
         // SAFETY: this size and align come from a vec and the allocator is the same one
         // that allocated the memory. i dont have to call drop because its Pod
         unsafe {
             let align = mem::align_of::<I>();
             let size = mem::size_of::<I>() * capacity;
-            let layout = Layout::from_size_align_unchecked(size, align);
-            return_vec
-                .allocator()
-                .deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+            // ensuring i dont deallocate ZSTs or stuff with 0 capacity.
+            if size != 0 {
+                let layout = Layout::from_size_align_unchecked(size, align);
+                allocator.deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+            }
         };
 
-        return Ok(return_vec)
+        let mut return_vec =
+            Vec::with_capacity_in(capacity, AlignmentCorrectorAllocator::new_null(allocator));
+        unsafe { return_vec.set_len(length) };
+
+        return Ok(return_vec);
+    } else if mem::size_of::<I>() == 0 {
+        // freeing memory
+        // SAFETY: this size and align come from a vec and the allocator is the same one
+        // that allocated the memory. i dont have to call drop because its Pod
+        unsafe {
+            let align = mem::align_of::<I>();
+            let size = mem::size_of::<I>() * capacity;
+            // ensuring i dont deallocate ZSTs or stuff with 0 capacity.
+            if size != 0 {
+                let layout = Layout::from_size_align_unchecked(size, align);
+                allocator.deallocate(NonNull::new_unchecked(ptr.cast()), layout);
+            }
+        };
+        return Ok(Vec::new_in(AlignmentCorrectorAllocator::new_null(allocator)));
     }
 
     match mem::size_of::<I>().cmp(&mem::size_of::<O>()) {
@@ -372,9 +403,10 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
                 // SAFETY: the length and capacity of vec is corrected to be the correct size,
                 // and its not discarding bytes on the end. the alignment is also checked and on
                 // drop, the custom allocator ensures deallocation is handled properly
+                // vecs also only give out nonnull ptrs
                 Ok(unsafe {
                     from_raw_parts(
-                        ptr.cast(),
+                        NonNull::new_unchecked(ptr).cast(),
                         (length * mem::size_of::<I>()) / mem::size_of::<O>(),
                         (capacity * mem::size_of::<I>()) / mem::size_of::<O>(),
                         allocator,
@@ -385,7 +417,14 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
         Ordering::Equal => {
             if ptr.align_offset(mem::align_of::<O>()) == 0 {
                 // SAFETY: its aligned and thats all that matters
-                Ok(unsafe { from_raw_parts(ptr.cast(), length, capacity, allocator) })
+                Ok(unsafe {
+                    from_raw_parts(
+                        NonNull::new_unchecked(ptr).cast(),
+                        length,
+                        capacity,
+                        allocator,
+                    )
+                })
             } else {
                 Err((
                     // SAFETY: this came directly from a vec
@@ -456,6 +495,7 @@ mod tests {
         for _ in 0..10 {
             output.pop();
         }
+        output.shrink_to_fit()
     }
 
     #[test]
