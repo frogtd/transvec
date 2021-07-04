@@ -170,7 +170,7 @@ unsafe fn from_raw_parts<I, O, A: Allocator>(
 /// Whether or not a copy occured.
 /// Also the copy variant doesn't have the custom allocator, and is therefore one usize smaller.
 pub enum CopyNot<I, O, A: Allocator> {
-    /// Copy occured
+    /// Copy occured.
     Copy(Vec<O, A>),
     /// There was no copy.
     Not(Vec<O, AlignmentCorrectorAllocator<I, O, A>>),
@@ -259,6 +259,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
 
 /// Same as `transmute_vec` but in case of an error it copies instead.
 /// If it's over the length it removes whatever doesn't fit.
+/// 
 /// You may want to use [`transmute_vec_copy_enum`].
 pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
@@ -363,7 +364,7 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
         unsafe { return_vec.set_len(length) };
 
         return Ok(return_vec);
-    } else if mem::size_of::<I>() == 0 {
+    } else if mem::size_of::<I>() == 0 || capacity == 0 {
         // freeing memory
         // SAFETY: this size and align come from a vec and the allocator is the same one
         // that allocated the memory. i dont have to call drop because its Pod
