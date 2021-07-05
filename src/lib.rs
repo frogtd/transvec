@@ -53,7 +53,7 @@ pub enum TransmuteError {
 }
 
 /// Implementation detail: Do not use
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
     allocator: A,
     ptr: Cell<Option<NonNull<O>>>,
