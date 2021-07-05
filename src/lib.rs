@@ -52,7 +52,7 @@ pub enum TransmuteError {
     Capacity,
 }
 
-/// Implementation detail: Do not use
+/// Handling correcting the alignment fed into the inner allocator.
 #[derive(Debug)]
 pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
     allocator: A,
@@ -60,14 +60,19 @@ pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
     phantom: PhantomData<I>,
 }
 impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
-    unsafe fn new(ptr: NonNull<O>, allocator: A) -> Self {
+    /// Create new `AlignmentCorrectorAllocator`.
+    ///
+    /// # Safety
+    /// The `ptr` must be allocated with the `allocator` in the alignment of `I`.
+    pub unsafe fn new(ptr: NonNull<O>, allocator: A) -> Self {
         Self {
             allocator,
             ptr: Cell::new(Some(ptr)),
             phantom: PhantomData::default(),
         }
     }
-    fn new_null(allocator: A) -> Self {
+    /// Create a new `AlignmentCorrectorAllocator` that acts the same as the allocator fed into it.
+    pub fn new_null(allocator: A) -> Self {
         Self {
             allocator,
             ptr: Cell::new(None),
@@ -259,7 +264,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
 
 /// Same as `transmute_vec` but in case of an error it copies instead.
 /// If it's over the length it removes whatever doesn't fit.
-/// 
+///
 /// You may want to use [`transmute_vec_copy_enum`].
 pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
@@ -332,7 +337,7 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
 /// 2. ZST -> Non ZST
 ///     - New Vec from previous allocator.
 /// 3. Just don't do this.
-/// 
+///
 /// # See also
 /// - [`transmute_vec_may_copy`]
 #[allow(clippy::type_complexity)]
@@ -377,7 +382,9 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
                 allocator.deallocate(NonNull::new_unchecked(ptr.cast()), layout);
             }
         };
-        return Ok(Vec::new_in(AlignmentCorrectorAllocator::new_null(allocator)));
+        return Ok(Vec::new_in(AlignmentCorrectorAllocator::new_null(
+            allocator,
+        )));
     }
 
     match mem::size_of::<I>().cmp(&mem::size_of::<O>()) {
