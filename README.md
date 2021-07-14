@@ -34,7 +34,8 @@ with the only options being `transmute_vec_basic` and `transmute_vec_basic_may_c
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would 
+like to change.
 
 Please make sure to update tests as appropriate.
 
