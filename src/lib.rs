@@ -1,4 +1,4 @@
-#![feature(allocator_api)]
+#![cfg_attr(feature = "allocator_api", feature(allocator_api))]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![deny(missing_docs)]
 //! This is a way to "transmute" Vecs soundly.
@@ -26,32 +26,47 @@
 //! }
 
 use bytemuck::Pod;
-use core::slice;
-use std::{
-    alloc::{AllocError, Allocator, Layout},
+#[cfg(feature = "allocator_api")]
+use core::alloc::{AllocError, Allocator, Layout};
+use core::{
     cell::Cell,
     cmp::Ordering,
+    fmt::Display,
     marker::PhantomData,
     mem::{self, ManuallyDrop},
     ptr::{self, NonNull},
+    slice,
 };
-use thiserror::Error;
+use std::{error::Error, hint};
 
 /// Error for Vec transmutes.
 /// It will always be `Alignment` -> `Length` -> `Capacity`
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TransmuteError {
-    #[error("alignment of vec is incorrect")]
+    // #[error("alignment of vec is incorrect")]
     /// When the alignment of vec is incorrect.
     Alignment,
-    #[error("length of vec is incorrect")]
+    // #[error("length of vec is incorrect")]
     /// When the length wouldn't be able to fit.
     Length,
-    #[error("capacicty of vec is incorrect")]
+    // #[error("capacicty of vec is incorrect")]
     /// When the capacity wouldn't be able to fit.
     Capacity,
 }
 
+impl Display for TransmuteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransmuteError::Alignment => write!(formatter, "Alignment: alignment of the pointer to I must be equal or greater than the alignment of O"),
+            TransmuteError::Length => write!(formatter, "Length: I's items cant fit in O's (e.g. 1 u8 to 1 u16)"),
+            TransmuteError::Capacity => write!(formatter, "Capacity: capacicty of vec is incorrect"),
+        }
+    }
+}
+
+impl Error for TransmuteError {}
+
+#[cfg(feature = "allocator_api")]
 /// Handling correcting the alignment fed into the inner allocator.
 #[derive(Debug)]
 pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
@@ -59,6 +74,7 @@ pub struct AlignmentCorrectorAllocator<I, O, A: Allocator> {
     ptr: Cell<Option<NonNull<O>>>,
     phantom: PhantomData<I>,
 }
+#[cfg(feature = "allocator_api")]
 impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
     /// Create new `AlignmentCorrectorAllocator`.
     ///
@@ -80,6 +96,8 @@ impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
         }
     }
 }
+
+#[cfg(feature = "allocator_api")]
 unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, A> {
     #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
@@ -154,6 +172,7 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
     }
 }
 
+#[cfg(feature = "allocator_api")]
 unsafe fn from_raw_parts<I, O, A: Allocator>(
     old_ptr: NonNull<O>,
     length: usize,
@@ -172,6 +191,7 @@ unsafe fn from_raw_parts<I, O, A: Allocator>(
     }
 }
 
+#[cfg(feature = "allocator_api")]
 /// Whether or not a copy occured.
 /// Also the copy variant doesn't have the custom allocator, and is therefore one usize smaller.
 pub enum CopyNot<I, O, A: Allocator> {
@@ -181,6 +201,7 @@ pub enum CopyNot<I, O, A: Allocator> {
     Not(Vec<O, AlignmentCorrectorAllocator<I, O, A>>),
 }
 
+#[cfg(feature = "allocator_api")]
 /// [`transmute_vec_may_copy`] but it tells you whether or not a copy occured and returns a normal
 /// vec if it doesn't.
 pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -> CopyNot<I, O, A> {
@@ -204,8 +225,9 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                     (length * mem::size_of::<I>()) / mem::size_of::<O>(),
                     allocator,
                 );
-                for x in bytes_slice.chunks(mem::size_of::<O>()) {
+                for x in bytes_slice.chunks_exact(mem::size_of::<O>()) {
                     // SAFETY: O is Pod and the slice is the same length as the type.
+                    // also its
                     return_vec.push(unsafe { ptr::read_unaligned(x.as_ptr().cast()) })
                 }
                 // freeing memory
@@ -215,7 +237,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
                     let align = mem::align_of::<I>();
                     let size = mem::size_of::<I>() * capacity;
                     let layout = Layout::from_size_align_unchecked(size, align);
-                    // ensuring i dont deallocate ZSTs or unallocated memory
+                    // ensuring i dont deallocate unallocated memory
                     if size != 0 {
                         return_vec
                             .allocator()
@@ -262,6 +284,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
     }
 }
 
+#[cfg(feature = "allocator_api")]
 /// Same as `transmute_vec` but in case of an error it copies instead.
 /// If it's over the length it removes whatever doesn't fit.
 ///
@@ -328,6 +351,12 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
 /// let output: Vec<u16, _> = transmute_vec(input).unwrap();
 /// ```
 /// 2. The capacity can't be converted to units of the output type.
+/// ```should_panic
+/// # #![feature(allocator_api)]
+/// # use transvec::transmute_vec;
+/// let input: Vec<u8> = Vec::with_capacity(3);
+/// let output: Vec<u16, _> = transmute_vec(input).unwrap();
+/// ```
 /// 3. The alignment of the vec is wrong.
 ///
 /// Alignment, then length, then capacity will always be returned.
@@ -339,7 +368,9 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
 /// 3. Just don't do this.
 ///
 /// # See also
-/// - [`transmute_vec_may_copy`]
+/// - [`transmute_vec_may_copy`] -- Infailable
+/// - [`transmute_vec_basic`] -- Returns a Vec without a specical allocator and works on stable, but only works with types with the same alignment.
+#[cfg(feature = "allocator_api")]
 #[allow(clippy::type_complexity)]
 pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
@@ -444,16 +475,101 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
     }
 }
 
+/// If alignment is the same this function is preferred over [`transmute_vec`].
+/// # Panics
+/// Panics if the alignment is not the same.
+/// (This may be turned into a compile time error in the future, when possible without using nightly
+/// features).
+pub fn transmute_vec_basic<I: Pod, O: Pod>(
+    input: Vec<I>,
+) -> Result<Vec<O>, (Vec<I>, TransmuteError)> {
+    let (ptr, length, capacity) = {
+        let mut me = ManuallyDrop::new(input);
+        (me.as_mut_ptr(), me.len(), me.capacity())
+    };
+
+    if mem::align_of::<I>() != mem::align_of::<O>() {
+        panic!(
+            "Alignment of {} and {} are not the same",
+            std::any::type_name::<I>(),
+            std::any::type_name::<O>(),
+        )
+    } else if mem::size_of::<I>() == 0 || mem::size_of::<O>() == 0 || capacity == 0 {
+        // SAFETY: this came directly from a vec
+        drop(unsafe { Vec::from_raw_parts(ptr, length, capacity) });
+        return Ok(Vec::new());
+    }
+
+    match mem::size_of::<I>().cmp(&mem::size_of::<O>()) {
+        Ordering::Greater | Ordering::Less => {
+            if (length * mem::size_of::<I>()) % mem::size_of::<O>() != 0 {
+                Err((
+                    // SAFETY: this came directly from a vec
+                    unsafe { Vec::from_raw_parts(ptr, length, capacity) },
+                    TransmuteError::Length,
+                ))
+            } else if (capacity * mem::size_of::<I>()) % mem::size_of::<O>() != 0 {
+                Err((
+                    // SAFETY: this came directly from a vec
+                    unsafe { Vec::from_raw_parts(ptr, length, capacity) },
+                    TransmuteError::Capacity,
+                ))
+            } else {
+                // SAFETY: the length and capacity of vec is corrected to be the correct size,
+                // and its not discarding bytes on the end. the alignment is also checked.
+                Ok(unsafe {
+                    Vec::from_raw_parts(
+                        ptr.cast(),
+                        (length * mem::size_of::<I>()) / mem::size_of::<O>(),
+                        (capacity * mem::size_of::<I>()) / mem::size_of::<O>(),
+                    )
+                })
+            }
+        }
+        Ordering::Equal => {
+            // SAFETY: they are both the same size and Pod
+            Ok(unsafe {
+                Vec::from_raw_parts(
+                    ptr.cast(),
+                    (length * mem::size_of::<I>()) / mem::size_of::<O>(),
+                    (capacity * mem::size_of::<I>()) / mem::size_of::<O>(),
+                )
+            })
+        }
+    }
+}
+
+/// [`transmute_vec_basic`] but on fail it copies instead.
+pub fn transmute_vec_basic_copy<I: Pod, O: Pod>(input: Vec<I>) -> Vec<O> {
+    match transmute_vec_basic(input) {
+        Ok(x) => x,
+        Err((old_vec, err)) => match err {
+            TransmuteError::Alignment => unsafe { hint::unreachable_unchecked() },
+            TransmuteError::Capacity | TransmuteError::Length => {
+                // I don't have to deal with ZSTs because transmute_vec will never fail with a ZST.
+                let ptr = old_vec.as_ptr();
+                let length = old_vec.len();
+                // SAFETY: the divide rounds down so the length is correct
+                unsafe {
+                    slice::from_raw_parts(
+                        ptr.cast::<O>(),
+                        (length * mem::size_of::<I>()) / mem::size_of::<O>(),
+                    )
+                }
+                .to_vec()
+            }
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::{transmute_vec, TransmuteError};
+    use crate::{
+        transmute_vec, transmute_vec_basic, transmute_vec_basic_copy, transmute_vec_may_copy,
+        TransmuteError,
+    };
 
-    use bytemuck_derive::{Pod, Zeroable};
-
-    #[derive(Copy, Clone, Pod, Zeroable)]
-    #[repr(C)]
-    struct Zst;
     #[test]
     // It does work with the same sized types
     fn basic_functioning() {
@@ -463,6 +579,32 @@ mod tests {
             Err((_, err)) => return println!("Error: {:?}", err),
         };
         assert_eq!(&output, &[0, 1, 2, 3, 4, 6]);
+    }
+    #[test]
+    // It does work with the same sized types
+    fn basic_basic_functioning() {
+        let input: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
+        let output: Vec<i8, _> = match transmute_vec_basic(input) {
+            Ok(x) => x,
+            Err((_, err)) => return println!("Error: {:?}", err),
+        };
+        assert_eq!(&output, &[0, 1, 2, 3, 4, 6]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn unalign_panic() {
+        let _ = transmute_vec_basic::<u8, u16>(Vec::new());
+    }
+
+    #[test]
+    fn different_size_same_align() {
+        let input: Vec<u8> = vec![0, 1, 2, 3, 4, 6];
+        let output: Vec<[u8; 2], _> = match transmute_vec_basic(input) {
+            Ok(x) => x,
+            Err((_, err)) => return println!("Error: {:?}", err),
+        };
+        assert_eq!(&output, &[[0, 1], [2, 3], [4, 6]])
     }
 
     #[test]
@@ -519,8 +661,37 @@ mod tests {
     }
 
     #[test]
+    fn wrong_length_copy() {
+        let input: Vec<u8> = vec![1, 2, 3];
+        let output: Vec<u16, _> = transmute_vec_may_copy::<_, u16, _>(input);
+        if cfg!(target_endian = "big") {
+            assert_eq!(&output, &[258]);
+        } else {
+            assert_eq!(&output, &[513]);
+        }
+    }
+
+    #[test]
+    fn may_copy() {
+        let input: Vec<u8> = vec![1, 2];
+        let output: Vec<u16, _> = transmute_vec_may_copy::<_, u16, _>(input);
+        if cfg!(target_endian = "big") {
+            assert_eq!(&output, &[258]);
+        } else {
+            assert_eq!(&output, &[513]);
+        }
+    }
+
+    #[test]
+    fn basic_copy() {
+        let input: Vec<u8> = vec![1, 2];
+        let output: Vec<[u8; 2], _> = transmute_vec_basic_copy(input);
+        assert_eq!(&output, &[[1, 2]]);
+    }
+
+    #[test]
     fn from_zsts() {
-        let input = vec![Zst {}, Zst {}, Zst {}];
+        let input = vec![(), (), ()];
         let output: Vec<u8, _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
@@ -531,7 +702,7 @@ mod tests {
     #[test]
     fn to_zsts() {
         let input: Vec<u8> = vec![0, 1, 2, 3, 4, 5];
-        let output: Vec<Zst, _> = match transmute_vec(input) {
+        let output: Vec<(), _> = match transmute_vec(input) {
             Ok(x) => x,
             Err((_, err)) => return println!("Error: {:?}", err),
         };
