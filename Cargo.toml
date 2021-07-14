@@ -1,6 +1,6 @@
 [package]
 name = "transvec"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2018"
 readme = "README.md"
 repository = "https://github.com/frogtd/transvec"
@@ -11,8 +11,9 @@ categories = ["memory-management"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["allocator_api"]
+default = ["allocator_api", "std"]
 allocator_api = []
+std = []
 
 [dependencies]
 bytemuck = "1.7"
