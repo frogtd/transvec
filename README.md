@@ -19,7 +19,7 @@ let input: Vec<u8> = vec![1, 2, 3, 4];
 let output: Vec<u16, _> = transmute_vec(input).unwrap();
 ```
 
-# `#![no_std]`
+## `#![no_std]`
 
 This supports no_std, just disable the default features, and optionally enable `allocator_api`. It 
 does require `alloc` though.
