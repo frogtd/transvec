@@ -122,6 +122,8 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, mut layout: Layout) {
         if Some(ptr.cast()) == self.ptr.get() {
             layout =
+                // SAFETY: the layout size must be correct for this I's alignment because it the
+                // creator of a AlignmentCorrectorAllocator ensures that.
                 unsafe { Layout::from_size_align_unchecked(layout.size(), mem::align_of::<I>()) };
             self.ptr.set(None);
         }
@@ -138,6 +140,8 @@ unsafe impl<I, O, A: Allocator> Allocator for AlignmentCorrectorAllocator<I, O, 
     ) -> Result<NonNull<[u8]>, AllocError> {
         if Some(ptr.cast()) == self.ptr.get() {
             old_layout = unsafe {
+                // SAFETY: the layout size must be correct for this I's alignment because it the
+                // creator of a AlignmentCorrectorAllocator ensures that.
                 Layout::from_size_align_unchecked(old_layout.size(), mem::align_of::<I>())
             };
             self.ptr.set(None);
@@ -506,6 +510,7 @@ pub fn transmute_vec_basic<I: Pod, O: Pod>(
             core::any::type_name::<O>(),
         )
     } else if mem::size_of::<O>() == 0 {
+        // SAFETY: this came directly from a vec
         drop(unsafe { Vec::from_raw_parts(ptr, length, capacity) });
         let mut vec = Vec::with_capacity(capacity);
         // SAFETY: its a zst so this is allowed
