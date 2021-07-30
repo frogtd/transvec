@@ -8,7 +8,7 @@ Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-transvec = "0.3.1"
+transvec = "0.3"
 ```
 
 ## Usage
@@ -21,8 +21,8 @@ let output: Vec<u16, _> = transmute_vec(input).unwrap();
 
 ## `#![no_std]`
 
-This supports no_std, just disable the default features, and optionally enable `allocator_api`. It 
-does require `alloc` though.
+This supports no_std, just disable the default features, and optionally enable `allocator_api`,
+which in addition requires atomic pointers. It does require `alloc` though.
 
 ## Nightly
 
