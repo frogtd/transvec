@@ -4,6 +4,8 @@
 #![deny(missing_docs)]
 //! This is a way to "transmute" Vecs soundly.
 //! ```
+//! # #[cfg(feature = "allocator_api")]
+//! # {
 //! #![feature(allocator_api)] // this requires the allocator api because the way that this
 //! // handles deallocating hooks into the allocator api
 //! use transvec::transmute_vec;
@@ -25,6 +27,8 @@
 //!         &[1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8, 0]
 //!     );
 //! }
+//! # }
+//! ```
 
 extern crate alloc;
 
@@ -497,16 +501,16 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
 /// 1. The length of the vector wouldn't fit the type.
 /// ```should_panic
 /// # #![feature(allocator_api)]
-/// # use transvec::transmute_vec;
+/// # use transvec::transmute_vec_basic;
 /// let input: Vec<u8> = vec![1, 2, 3];
-/// let output: Vec<u16, _> = transmute_vec(input).unwrap();
+/// let output: Vec<u16, _> = transmute_vec_basic(input).unwrap();
 /// ```
 /// 2. The capacity can't be converted to units of the output type.
 /// ```should_panic
 /// # #![feature(allocator_api)]
-/// # use transvec::transmute_vec;
+/// # use transvec::transmute_vec_basic;
 /// let input: Vec<u8> = Vec::with_capacity(3);
-/// let output: Vec<u16, _> = transmute_vec(input).unwrap();
+/// let output: Vec<u16, _> = transmute_vec_basic(input).unwrap();
 /// ```
 /// Length, then capacity will be returned.
 /// # ZSTs
@@ -616,9 +620,10 @@ pub fn transmute_vec_basic_copy<I: Pod, O: Pod>(input: Vec<I>) -> Vec<O> {
 mod tests {
 
     use alloc::{vec, vec::Vec};
-
+    #[cfg(feature = "allocator_api")]
+    use crate::{transmute_vec, transmute_vec_may_copy};
     use crate::{
-        transmute_vec, transmute_vec_basic, transmute_vec_basic_copy, transmute_vec_may_copy,
+        transmute_vec_basic, transmute_vec_basic_copy,
         TransmuteError,
     };
 
@@ -716,6 +721,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "allocator_api")]
     fn wrong_length() {
         let input: Vec<u8> = vec![1, 2, 3];
         match transmute_vec::<_, u16, _>(input) {
