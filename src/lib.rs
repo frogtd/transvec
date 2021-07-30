@@ -96,7 +96,7 @@ impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
     pub fn new_null(allocator: A) -> Self {
         Self {
             allocator,
-            ptr: AtomicPtr::new(std::ptr::null_mut()),
+            ptr: AtomicPtr::new(ptr::null_mut()),
             phantom: PhantomData::default(),
         }
     }
@@ -109,7 +109,7 @@ impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
         loop {
             match self.ptr.compare_exchange_weak(
                 old,
-                std::ptr::null_mut(),
+                ptr::null_mut(),
                 atomic::Ordering::SeqCst,
                 atomic::Ordering::Relaxed,
             ) {
