@@ -339,25 +339,7 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
 ) -> Vec<O, AlignmentCorrectorAllocator<I, O, A>> {
     match transmute_vec_copy_enum(input) {
-        CopyNot::Copy(x) => {
-            let (ptr, length, capacity, allocator) = {
-                let mut me = ManuallyDrop::new(x);
-                (me.as_mut_ptr(), me.len(), me.capacity(), unsafe {
-                    ptr::read(me.allocator())
-                })
-            };
-
-            // SAFETY: comes directly from vec and AlignmentCorrectorAllocator::new_null
-            // doesn't interfere with the allocator within
-            unsafe {
-                Vec::from_raw_parts_in(
-                    ptr,
-                    length,
-                    capacity,
-                    AlignmentCorrectorAllocator::new_null(allocator),
-                )
-            }
-        }
+        CopyNot::Copy(x) => add_alignment_allocator(x),
         CopyNot::Not(x) => x,
     }
 }
