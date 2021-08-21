@@ -34,6 +34,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use bytemuck::Pod;
+
 #[cfg(feature = "allocator_api")]
 use core::alloc::{AllocError, Allocator, Layout};
 use core::{
@@ -306,6 +307,30 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
 }
 
 #[cfg(feature = "allocator_api")]
+/// Changes from any allocator to an [`AlignmentCorrectorAllocator`].
+pub fn add_alignment_allocator<I: Pod, O: Pod, A: Allocator>(
+    input: Vec<O, A>,
+) -> Vec<O, AlignmentCorrectorAllocator<I, O, A>> {
+    let (ptr, length, capacity, allocator) = {
+        let mut me = ManuallyDrop::new(input);
+        (me.as_mut_ptr(), me.len(), me.capacity(), unsafe {
+            ptr::read(me.allocator())
+        })
+    };
+
+    // SAFETY: comes directly from vec and AlignmentCorrectorAllocator::new_null
+    // doesn't interfere with the allocator within
+    unsafe {
+        Vec::from_raw_parts_in(
+            ptr,
+            length,
+            capacity,
+            AlignmentCorrectorAllocator::new_null(allocator),
+        )
+    }
+}
+
+#[cfg(feature = "allocator_api")]
 /// Same as `transmute_vec` but in case of an error it copies instead.
 /// If it's over the length it removes whatever doesn't fit.
 ///
@@ -519,7 +544,7 @@ pub fn transmute_vec<I: Pod, O: Pod, A: Allocator>(
 /// 2. ZST -> Non ZST
 ///     - New Vec from previous allocator.
 /// 3. Just don't do this.
-/// 
+///
 /// # Panics
 /// Panics if the alignment is not the same.
 /// (This may be turned into a compile time error in the future, when possible without using nightly
@@ -619,13 +644,10 @@ pub fn transmute_vec_basic_copy<I: Pod, O: Pod>(input: Vec<I>) -> Vec<O> {
 #[cfg(test)]
 mod tests {
 
-    use alloc::{vec, vec::Vec};
     #[cfg(feature = "allocator_api")]
     use crate::{transmute_vec, transmute_vec_may_copy};
-    use crate::{
-        transmute_vec_basic, transmute_vec_basic_copy,
-        TransmuteError,
-    };
+    use crate::{transmute_vec_basic, transmute_vec_basic_copy, TransmuteError};
+    use alloc::{vec, vec::Vec};
 
     #[test]
     #[cfg(feature = "allocator_api")]
