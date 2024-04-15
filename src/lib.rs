@@ -97,7 +97,7 @@ impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
         Self {
             allocator,
             ptr: AtomicPtr::new(ptr.as_ptr()),
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
     /// Create a new `AlignmentCorrectorAllocator` that acts the same as the allocator fed into it.
@@ -105,7 +105,7 @@ impl<I, O, A: Allocator> AlignmentCorrectorAllocator<I, O, A> {
         Self {
             allocator,
             ptr: AtomicPtr::new(ptr::null_mut()),
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 
@@ -248,7 +248,7 @@ pub fn transmute_vec_copy_enum<I: Pod, O: Pod, A: Allocator>(input: Vec<I, A>) -
     unsafe { transmute_vec_copy_enum_unsafe(input) }
 }
 /// [`transmute_vec_copy_enum`] but without Pod bounds.
-/// 
+/// # Safety
 /// See [`transmute_vec_unsafe`] for safety.
 #[cfg(feature = "allocator_api")]
 pub unsafe fn transmute_vec_copy_enum_unsafe<I, O, A: Allocator>(
@@ -385,7 +385,7 @@ pub fn transmute_vec_may_copy<I: Pod, O: Pod, A: Allocator>(
 /// If it's over the length it removes whatever doesn't fit.
 ///
 /// You may want to use [`transmute_vec_copy_enum`].
-/// # Safety:
+/// # Safety
 /// See [`transmute_vec_unsafe`]
 pub unsafe fn transmute_vec_may_copy_unsafe<I: Pod, O: Pod, A: Allocator>(
     input: Vec<I, A>,
@@ -423,7 +423,7 @@ unsafe fn deallocate_for_vec<I, A: Allocator>(
 }
 
 /// Transmute between two types of Vecs
-/// # Safety/Info
+/// # Safety
 /// - Data is dropped, use [`Vec::set_len`] if you don't want this.
 /// - `&[I]` to `&[O]` should be valid apart from length and alignment checks.
 /// # See also
@@ -617,9 +617,11 @@ pub fn transmute_vec_basic<I: Pod, O: Pod>(
     unsafe { transmute_vec_basic_unsafe(input) }
 }
 /// [`transmute_vec_basic`] but without Pod bounds.
-/// 
-/// # Safety:
-/// transmute::<I, O> for each value in your vec should be valid.
+///
+/// # Safety
+/// transmute::<[I; N], [O; M]> for each N elements in your input vector should be valid, for some
+/// constant M.
+///
 pub unsafe fn transmute_vec_basic_unsafe<I, O>(
     input: Vec<I>,
 ) -> Result<Vec<O>, (Vec<I>, TransmuteError)> {
@@ -637,9 +639,13 @@ pub unsafe fn transmute_vec_basic_unsafe<I, O>(
     } else if mem::size_of::<O>() == 0 {
         // SAFETY: this came directly from a vec
         drop(unsafe { Vec::from_raw_parts(ptr, length, capacity) });
+
         let mut vec = Vec::with_capacity(capacity);
-        // SAFETY: its a zst so this is allowed
-        unsafe { vec.set_len(length) };
+        // SAFETY: O is a ZST and so is () so the transmute is valid.
+        // It's also the callers fault if these weren't supposed to exist.
+        // Note: this should be free, so I will do so to satisfy clippy's
+        // complaining about set_len.
+        vec.resize_with(length, || unsafe { mem::transmute_copy(&()) });
         return Ok(vec);
     } else if mem::size_of::<I>() == 0 || capacity == 0 {
         // SAFETY: this came directly from a vec
@@ -686,6 +692,8 @@ pub unsafe fn transmute_vec_basic_unsafe<I, O>(
     }
 }
 /// [`transmute_vec_basic_copy`] but without Pod bounds.
+/// # Safety
+/// `transmute(a)` needs to be valid for every element `a` in your vector.`
 pub unsafe fn transmute_vec_basic_copy_unsafe<I, O>(input: Vec<I>) -> Vec<O> {
     match unsafe { transmute_vec_basic_unsafe(input) } {
         Ok(x) => x,
@@ -695,7 +703,7 @@ pub unsafe fn transmute_vec_basic_copy_unsafe<I, O>(input: Vec<I>) -> Vec<O> {
                 let length = old_vec.len();
                 let ptr = old_vec.as_mut_ptr();
                 let mut new_vec = Vec::with_capacity(length);
-                // SAFETY: 
+                // SAFETY:
                 unsafe {
                     ptr::copy_nonoverlapping(ptr, new_vec.as_mut_ptr() as *mut I, length);
                     new_vec.set_len(length);
